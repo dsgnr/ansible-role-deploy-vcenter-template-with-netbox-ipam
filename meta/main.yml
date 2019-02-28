@@ -1,0 +1,21 @@
+---
+galaxy_info:
+  author: Dan Hand (dsgnr)
+  description: Deploy a new vCenter template and obtain an IP from Netbox IPAM
+  company:
+
+  license: GPLv3
+
+  min_ansible_version: 2.7.x
+
+  platforms:
+    - name: Ubuntu
+      versions:
+        - all
+    - name: RHEL/CentOS
+      versions:
+        - all
+
+  galaxy_tags: []
+
+dependencies: []

@@ -1,0 +1,22 @@
+---
+vcenter_hostname: "{{ vault_vcenter_hostname }}"
+vcenter_user: "{{ vault_vcenter_user }}"
+vcenter_pass: "{{ vault_vcenter_pass }}"
+esxhost: Cluster
+datastore: SSDStore
+vmtemplate: CentOS7
+vmcluster: LAB
+vmname: V-Cent003
+notes: "Ansible"
+vmvlan: vlan
+vmmem: "2048"
+vmcpu: "2"
+dns_servers: "10.50.3.250"
+ipamdescription: "Provisioned via automation on {{ datenow.stdout }}"
+host_group: "{% if vmtemplate == 'Ubuntu16' %}ubuntu{% endif %}{% if vmtemplate == 'Ubuntu18 %}ubuntu{% endif %}{% if vmtemplate == 'CentOS7' %}centos{% endif %"
+vlan_prefix: "{% if vlan == 30 %}1{% elif vlan == 50 %}3{% endif %}"
+vmnetwork: "{% if vlan == 30 %}MainNet-VLAN30{% elif vlan == 50 %}VMNet-VLAN50{% elif vlan == 60 %}DevNet-VLAN60{% endif %}"
+vmgateway: "{% if vlan == 50 %}10.50.3.1{% elif vlan == 60 %}10.50.4.1{% elif vlan == 30 %}10.50.1.1{% endif %}"
+vmnetmask: "255.255.255.0"
+vmplatform: "{% if vmtemplate == 'CentOS7' %}2{% elif vmtemplate == 'Ubuntu16' %}1{% elif vmtemplate == 'Ubuntu18' %}2{% elif vmtemplate == 'WinServ' %}5{% endif %}"
+cluster: "{% if vmcluster == 'LAB' %}1{% endif %}"

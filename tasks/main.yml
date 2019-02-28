@@ -1,0 +1,147 @@
+---
+
+- name: "Obtain next available IP on {{ vmnetwork }}"
+  uri:
+    url: "{{ vault_ipam_url }}ipam/prefixes/{{ vlan_prefix }}/available-ips/?limit=1"
+    method: GET
+    validate_certs: no
+    return_content: yes
+    body_format: json
+    headers:
+      Authorization: "Token {{ vault_ipam_token }}"
+      Accept: "application/json"
+  register: obtain_ip
+
+- name: Register new IP
+  set_fact:
+    vmipaddr: "{{ obtain_ip.json[0].address | replace('/24', '') }}"
+
+- name: "Add {{ vmname }} to IPAM"
+  uri:
+    url: "{{ vault_ipam_url }}virtualization/virtual-machines/"
+    method: POST
+    validate_certs: no
+    status_code: 201
+    return_content: yes
+    body_format: json
+    body: '{ "name": "{{ vmname }}", "cluster": "{{ cluster }}", "vcpus": "{{ vmcpu }}", "memory": "{{ vmmem }}", "platform": {{ vmplatform }} }'
+    headers:
+      Authorization: "Token {{ vault_ipam_token }}"
+      Accept: "application/json"
+
+- name: "Get VM ID"
+  uri:
+    url: "{{ vault_ipam_url }}virtualization/virtual-machines/?format=json&name={{ vmname }}"
+    method: GET
+    validate_certs: no
+    return_content: yes
+    body_format: json
+    headers:
+      Accept: "application/json"
+  register: get_vm_id
+
+- name: Set facts from IPAM
+  set_fact:
+    vmid: "{{ get_vm_id.json.results[0].id }}"
+
+- name: "Add interface to VM in IPAM"
+  uri:
+    url: "{{ vault_ipam_url }}virtualization/interfaces/"
+    method: POST
+    validate_certs: no
+    status_code: 201
+    return_content: yes
+    body_format: json
+    body: '{ "name": "ens192", "virtual_machine": {{ vmid }} }'
+    headers:
+      Authorization: "Token {{ vault_ipam_token }}"
+      Accept: "application/json"
+  register: get_interface_id
+
+- name: Set facts from IPAM
+  set_fact:
+    interface_id: "{{ get_interface_id.json.id }}"
+
+- name: "Add IP to interface"
+  uri:
+    url: "{{ vault_ipam_url }}ipam/ip-addresses/"
+    method: POST
+    validate_certs: no
+    status_code: 201
+    return_content: yes
+    body_format: json
+    body: '{ "interface": {{ interface_id }}, "virtual_machine": {{ vmid }}, "address": "{{ obtain_ip.json[0].address }}" }'
+    headers:
+      Authorization: "Token {{ vault_ipam_token }}"
+      Accept: "application/json"
+  register: get_ip_id
+
+- name: Set facts from IPAM
+  set_fact:
+    ip_id: "{{ get_ip_id.json.id }}"
+
+- name: "Make IP default on interface"
+  uri:
+    url: "{{ vault_ipam_url }}virtualization/virtual-machines/{{ vmid }}/"
+    method: PATCH
+    validate_certs: no
+    status_code: 200
+    return_content: yes
+    body_format: json
+    body: '{ "primary_ip4": {{ ip_id }}, "cluster": 1 }'
+    headers:
+      Authorization: "Token {{ vault_ipam_token }}"
+      Accept: "application/json"
+
+- name: "Add DNS - {{ vmname }}.{{ domain_root }} to {{ vmipaddr }}"
+  nsupdate:
+    key_name: "nsupdate"
+    key_secret: "{{ vault_nsupdate_secret }}"
+    server: "{{ dns_server_fqdn }}"
+    zone: "{{ domain_root }}"
+    record: "{{ vmname }}"
+    value: "{{ vmipaddr }}"
+
+- name: "Add Reverse DNS - {{ vmname }}.{{ domain_root }} to {{ vmipaddr }}"
+  nsupdate:
+    key_name: "nsupdate"
+    key_secret: "{{ vault_nsupdate_secret }}"
+    server: "{{ dns_server_fqdn }}"
+    type: "PTR"
+    zone: "{{ obtain_ip.json[0].address|ipaddr('revdns') | regex_replace('^[0-9]+\\.[0-9]+\\.', '') }}"
+    record: "{{ obtain_ip.json[0].address|ipaddr('revdns') }}"
+    value: "{{ vmname }}.{{ domain_root }}."
+
+- name: "Flush DDNS cache"
+  command: "rndc sync -clean"
+  delegate_to: "{{ dns_server_fqdn }}"
+
+- name: Create VM from template
+  vmware_guest:
+    validate_certs: False
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_user }}"
+    password: "{{ vcenter_pass }}"
+    cluster: "Cluster"
+    datacenter: LAB
+    name: "{{ vmname }}"
+    template: "{{ vmtemplate }}"
+    folder: /
+    state: poweredon
+    networks:
+      - name: "{{ vmnetwork }}"
+        start_connected: true
+        ip: "{{ vmipaddr }}"
+        netmask: "{{ vmnetmask }}"
+        gateway: "{{ vmgateway }}"
+        domain: "{{ domain_root }}"
+        dns_servers:
+          - "{{ dns_server_ip }}"
+        type: static
+    customization:
+      dns_servers:
+        - "{{ dns_server_ip }}"
+    hardware:
+      memory_mb: "{{ vmmem }}"
+      num_cpus: "{{ vmcpu }}"
+  register: newvm

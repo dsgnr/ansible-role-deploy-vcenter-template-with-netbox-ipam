@@ -1,0 +1,65 @@
+#Installs tools
+$currLocation = Get-Location
+Set-Location 'C:\Program Files\Veeam\Backup and Replication\Console'
+$Install=Invoke-Expression ".\Install-VeeamToolkit.ps1"
+Set-Location $currLocation
+
+#Grabs VM information from vCenter
+Write-Host -ForegroundColor Yellow "Pulling VM information from vCenter..."
+$entity=Find-VBRViEntity -Name {{ vmname }}
+
+#Grabs Backup Repository
+Write-Host -ForegroundColor Yellow "Getting Backup Repository info..."
+$repository=Get-VBRBackupRepository -Name "Synology"
+
+#Script
+$script=New-VBRJobScriptOptions -PostScriptEnabled -PostCommand "Powershell.exe -File C:\Scripts\VeeamSlackNotifications\SlackNotificationBootstrap.ps1"
+
+#Adds Job to Veeam B&R
+Write-Host -ForegroundColor Yellow "Adding job to Veeam B&R..."
+Add-VBRViBackupJob -Name "{{ vmname }}" -Entity $entity -BackupRepository $repository | Out-File -Append log.txt
+
+#Adds Script to Job
+Write-Host -ForegroundColor Yellow "Adding script to job..."
+$job = Get-VBRJob -Name "{{ vmname }}"
+$joboptions = $job.GetOptions()
+$joboptions.JobScriptCommand.PostScriptEnabled = $True
+$joboptions.JobScriptCommand.PostScriptCommandLine = "Powershell.exe -File C:\Scripts\VeeamSlackNotifications\SlackNotificationBootstrap.ps1"
+
+$jobOptions.GenerationPolicy.EnableCompactFull = $True
+$joboptions.GenerationPolicy.CompactFullBackupMonthlyScheduleOptions.DayNumberInMonth = "Last"
+$jobOptions.GenerationPolicy.CompactFullBackupScheduleKind = "Monthly"
+$jobOptions.GenerationPolicy.CompactFullBackupDays = "Saturday"
+
+$jobOptions.GenerationPolicy.EnableRechek = $True
+$jobOptions.GenerationPolicy.RecheckScheduleKind = "Monthly"
+$jobOptions.GenerationPolicy.RecheckDays = "Saturday"
+$jobOptions.GenerationPolicy.RecheckBackupMonthlyScheduleOptions.DayNumberInMonth = "Last"
+$jobOptions.GenerationPolicy.RecheckBackupMonthlyScheduleOptions.DayOfWeek = "Friday"
+
+$jobOptions.BackupStorageOptions.CompressionLevel = "6"
+$jobOptions.BackupStorageOptions.StgBlockSize = "KbBlockSize512"
+$jobOptions.BackupStorageOptions.EnableDeletedVmDataRetention = "True"
+$jobOptions.BackupStorageOptions.RetainDays = "14"
+$jobOptions.BackupStorageOptions.CheckRetention = $True
+$jobOptions.BackupStorageOptions.RetainCycles = "14"
+$jobOptions.BackupStorageOptions.EnableIntegrityChecks = $True
+
+
+$jobOptions.BackupTargetOptions.TransformFullToSyntethic = $True
+$jobOptions.BackupTargetOptions.TransformIncrementsToSyntethic = $True
+$jobOptions.BackupTargetOptions.TransformIncrementsToSyntethic = "Saturday"
+
+$jobOptions.BackupStorageOptions.RetainCycles = 14
+
+$SetJob=Set-VBRJobOptions -Job $job -Options $joboptions
+
+#Configures job schedule and enables it
+Write-Host -ForegroundColor Yellow "Configuring backup schedule and enabling job..."
+Get-VBRJob -Name "{{ vmname }}" | Set-VBRJobSchedule -Daily -At "09:00" -DailyKind Everyday | Enable-VBRJobSchedule | Out-File -Append log.txt
+Write-Host -ForegroundColor Green "Backup automation complete."
+
+Write-Host -ForegroundColor Yellow "Starting backup job..."
+$backupjob = Get-VBRJob -Name "{{ vmname }}"
+Start-VBRJob -Job $backupjob -FullBackup -RunAsync
+

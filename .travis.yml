@@ -1,0 +1,19 @@
+---
+language: python
+services: docker
+
+matrix:
+  include:
+    - os: linux
+      dist: xenial
+
+before_script:
+  - cd ../
+  - mv ansible-role-deploy-vcenter-template-with-netbox-ipam deploy-new-vm
+  - cd deploy-new-vm
+
+install:
+  - pip install molecule docker
+
+script:
+  - molecule lint
